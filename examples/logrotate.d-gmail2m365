@@ -1,0 +1,9 @@
+/var/log/gmail2m365-*.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 600 root root
+}

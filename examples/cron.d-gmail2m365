@@ -1,0 +1,3 @@
+# /etc/cron.d/gmail2m365 -- one line per destination mailbox
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root /usr/local/bin/gmail2m365.sh /etc/gmail2m365/alice.conf >> /var/log/gmail2m365-alice.log 2>&1
