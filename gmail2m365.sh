@@ -75,6 +75,7 @@ for entry in "${GMAIL_ACCOUNTS[@]}"; do
   gmail_user="${entry%%:*}"
   gmail_pwfile="${entry#*:}"
   mode_args=( --delete1 --expunge1 )
+  acct_rc=0; last=0
   if [ "$RETAIN_DAYS" -gt 0 ]; then
     # Snapshot Gmail's UIDVALIDITY/UIDNEXT *before* syncing so mail arriving mid-run is not skipped.
     st=$(gmail_cmd "$gmail_user" "$gmail_pwfile" "" "STATUS INBOX (UIDVALIDITY UIDNEXT)" | tr -d '\r' || true)
@@ -82,7 +83,6 @@ for entry in "${GMAIL_ACCOUNTS[@]}"; do
     uidnext=$(sed -n 's/.*UIDNEXT \([0-9]*\).*/\1/p' <<<"$st")
     [ -n "$validity" ] && [ -n "$uidnext" ] || { log "could not read INBOX status for ${gmail_user}: $st" >&2; rc=1; continue; }
     statefile="$STATE_DIR/lastuid.${gmail_user}"
-    last=0
     if [ -s "$statefile" ]; then
       read -r sv slast < "$statefile"
       if [ "$sv" = "$validity" ]; then last=$slast; else log "UIDVALIDITY changed for ${gmail_user} ($sv -> $validity); rescanning INBOX"; fi
@@ -90,7 +90,7 @@ for entry in "${GMAIL_ACCOUNTS[@]}"; do
     mode_args=()
     [ "$last" -gt 0 ] && mode_args=( --search1 "NOT UID 1:${last}" )
   fi
-  log "syncing ${gmail_user} -> ${M365_USER} (retain=${RETAIN_DAYS}d${last:+, after uid $last})"
+  log "syncing ${gmail_user} -> ${M365_USER} (retain=${RETAIN_DAYS}d$([ "$last" -gt 0 ] && echo ", after uid $last"))"
   timeout --kill-after=30 "$RUN_TIMEOUT" imapsync \
     --gmail1  --user1 "$gmail_user" --passfile1 "$gmail_pwfile" \
     --office2 --user2 "$M365_USER"  --oauthaccesstoken2 "$TOKEN_FILE" \
@@ -101,15 +101,16 @@ for entry in "${GMAIL_ACCOUNTS[@]}"; do
     "${mode_args[@]}" \
     --nofoldersizes --noreleasecheck --nolog \
     "${EXTRA_ARGS[@]}" \
-    || { rc=$?; [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && log "imapsync killed after ${RUN_TIMEOUT}s (rc=$rc)"; }
+    || { acct_rc=$?; [ "$acct_rc" -eq 124 ] || [ "$acct_rc" -eq 137 ] && log "imapsync killed after ${RUN_TIMEOUT}s (rc=$acct_rc)"; }
+  [ "$acct_rc" -eq 0 ] || rc=$acct_rc   # overall rc is sticky; acct_rc is per account
 
   # Advance the high-water mark only after a real, successful run (never for --dry / --justlogin).
-  if [ "$RETAIN_DAYS" -gt 0 ] && [ "$rc" -eq 0 ] && [[ " ${EXTRA_ARGS[*]} " != *" --dry "* ]] && [[ " ${EXTRA_ARGS[*]} " != *" --justlogin "* ]]; then
+  if [ "$RETAIN_DAYS" -gt 0 ] && [ "$acct_rc" -eq 0 ] && [[ " ${EXTRA_ARGS[*]} " != *" --dry "* ]] && [[ " ${EXTRA_ARGS[*]} " != *" --justlogin "* ]]; then
     ( umask 077; echo "$validity $((uidnext - 1))" > "$statefile" )
   fi
 
   # ---- 3. Retention: once a day, expunge INBOX messages older than RETAIN_DAYS ----
-  if [ "$RETAIN_DAYS" -gt 0 ] && [ "$rc" -eq 0 ]; then
+  if [ "$RETAIN_DAYS" -gt 0 ] && [ "$acct_rc" -eq 0 ]; then
     stamp="$STATE_DIR/expire.${gmail_user}"
     if [ ! -e "$stamp" ] || [ "$(find "$stamp" -mmin +1440 2>/dev/null)" ]; then
       cutoff=$(date -u -d "-${RETAIN_DAYS} days" +%d-%b-%Y)

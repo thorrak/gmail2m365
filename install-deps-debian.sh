@@ -14,6 +14,9 @@ apt-get install -y -qq jq curl cron logrotate ca-certificates perl make cpanminu
   libtest-nowarnings-perl libtest-deep-perl libtest-warn-perl libnet-ssleay-perl libdigest-hmac-perl
 curl -fsSL -o /usr/local/bin/imapsync https://imapsync.lamiral.info/imapsync
 chmod 755 /usr/local/bin/imapsync
-imapsync --modules_version | grep -i "missing" && { echo "some Perl modules are missing, see above"; exit 1; }
+if imapsync --modules_version | grep -q "Not installed"; then
+  imapsync --modules_version | grep "Not installed"
+  echo "some Perl modules are missing, see above" >&2; exit 1
+fi
 install -d -m 700 /etc/gmail2m365 /var/lib/gmail2m365
 echo "imapsync $(imapsync --version) installed; now copy gmail2m365.sh to /usr/local/bin and create /etc/gmail2m365/*.conf"
